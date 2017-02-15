@@ -1,0 +1,281 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <script type="text/javascript" src="<?php echo BASE_URL.'js/lib/jquery/jquery-1.10.2.min.js' ?>"></script>
+</head>
+<body>
+<form method="post" action="index.php">
+    <input type="text" name="product" placeholder="Product ID">
+    <input type="text" name="super_attribute_80" placeholder="Color">
+    <input type="text" name="super_attribute_125" placeholder="Size">
+    <input type="submit" value="ADD TO CART">
+</form>
+<?php
+if(isset($_SESSION['cart'])) { $subtotal = 0; //print_r($_SESSION['cart']);
+?>
+    <div class="cart">
+        <table id="shopping-cart-table" border="1">
+            <tr>
+                <th></th>
+                <th>Your Items</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Subtotal</th>
+                <th></th>
+            </tr>
+            <?php foreach ($_SESSION['cart'] as $i=>$item) { //print_r($item); ?>
+            <tr>
+                <td><a href="<?php echo $item['url_key'] ?>"><img src="<?php echo $item['image'] ?>" alt="<?php echo $item['name'] ?>" width="120" height="150" border="0" /></a></td>
+                <td>
+                    <?php   // display brand name
+                            echo $item['display_brand'] . "<br>";
+                            // display product name
+                            echo "<a href='".$item['url_key']."'>".$item['name']."</a>";
+                            // display product options
+                            if(isset($item['attributes']) && !empty($item['attributes'])) {
+                                foreach ($item['attributes'] as $attribute) {
+                                    if (empty($attribute)) continue;
+                                    echo "<div>".$attribute."</div>";
+                                }
+                            }
+                            // display giftcard options
+                            if(isset($item['giftcard']) && !empty($item['giftcard'])) {
+                                $giftcardData = json_decode($item['giftcard']);
+                                $item['rule_price'] = $item['special_price'] = 0;
+                                $item['price'] = $giftcardData->giftcard_amount;
+                                echo "<dt>Deliverd to :</dt><dd>".$giftcardData->giftcard_recipient_name."</dd><dd>".$giftcardData->giftcard_recipient_email."</dd>";
+                                echo "<dt>Message :</dt><dd>".$giftcardData->giftcard_message."</dd>";
+                                echo "<dt>From :</dt><dd>".$giftcardData->giftcard_sender_name."</dd>";
+                            }
+                            // display pre-order message
+                            if (!isset($item['whole_preorder'])) {
+                                $preOrderArray = checkPreOrderItem($item['id']);
+                                $item['whole_preorder'] = $preOrderArray['whole_preorder'];
+                                $item['preorder_shipping_date'] = $preOrderArray['preorder_shipping_date'];
+                                $_SESSION['cart'][$i] = $item;
+                            }
+                            $preOrderDate = date("Y-m-d", strtotime($item['preorder_shipping_date']));
+                            if ($item['whole_preorder']=="1") { // && $preOrderDate>=date("Y-m-d")
+                                echo "<span>This is a pre order item.<br>Expected ship date".$item['preorder_shipping_date'].".<br>Additional items in cart will ship at the same time.</span>";
+                            }
+                    ?>
+                </td>
+                <td><?php $price = 0;
+                        if (!empty($item['rule_price'])) {
+                            $price = $item['rule_price'];
+                            if ($item['rule_price']==$item['price'])
+                                echo "<span>".Mage::helper('core')->currency($item['price'], true, false)."</span>";
+                            else
+                                echo "<span style='text-decoration:line-through;'>".Mage::helper('core')->currency($item['price'], true, false)."</span>&nbsp;<span>".Mage::helper('core')->currency($item['rule_price'], true, false)."</span>";
+                        } elseif (!empty($item['special_price'])) {
+                            $price = $item['special_price'];
+                            echo "<span style='text-decoration:line-through;'>".Mage::helper('core')->currency($item['price'], true, false)."</span>&nbsp;<span>".Mage::helper('core')->currency($item['special_price'], true, false)."</span>";
+                        } else {
+                            $price = $item['price'];
+                            echo "<span>".Mage::helper('core')->currency($item['price'], true, false)."</span>";
+                        }
+                    ?>
+                </td>
+                <td><input type="number" min="0" step="1" value="<?php echo $item['qty'] ?>" onclick="updateItemQty('<?php echo $i ?>', this.value);"></td>
+                <td><?php $total = floatval($price) * intval($item['qty']); $subtotal += $total; echo Mage::helper('core')->currency($total, true, false); ?></td>
+                <td><a href="index.php?id=<?php echo $i ?>&action=delete">Delete</a></td>
+            </tr>
+            <?php } ?>
+        </table>
+        <br/>
+        <table id="subtotal-table" border="1">
+            <tr>
+                <td>Subtotal</td>
+                <td><?php echo Mage::helper('core')->currency($subtotal, true, false) ?></td>
+            </tr>
+            <tr>
+                <td>
+                    <!-----------------shipping---------------------------->
+                    <?php   $rates = getShippingMethods($_SESSION['conn']); //print_r($rates);
+                            $currentShippingMethod = isset($_SESSION['current_shipping_method']) ? $_SESSION['current_shipping_method'] : '';
+                            $shippingRates = array();
+                            foreach ($rates as $rate) {
+                                $shippingRates[$rate] = array(
+                                    "Title" => Mage::getStoreConfig("carriers/$rate/name"),
+                                    "Price" => Mage::getStoreConfig("carriers/$rate/price"),
+                                    "Code" => $rate,
+                                    "FreeShippingEnable" => Mage::getStoreConfig("carriers/$rate/free_shipping_enable"),
+                                    "FreeShippingSubtotal" => Mage::getStoreConfig("carriers/$rate/free_shipping_subtotal"),
+                                    "ApplicableForFreeShipping" => Mage::getStoreConfig("carriers/$rate/applicable_free_shipping"),
+                                    //"OriginalShippingPrice" => Mage::getStoreConfig("carriers/$rate/price"),
+                                    //"SortOrder" => Mage::getStoreConfig("carriers/$rate/sort_order")
+                                );
+                            }
+                    ?>
+                    <table>
+                    <tr class="stable-shipping-dropdown">
+                        <td id="shipping_title_top">
+                            <label id="shipping_label_top"><?php echo $title = Mage::getStoreConfig("carriers/$currentShippingMethod/name"); ?></label>
+                            <img id="show_shipping_list" src="<?php echo Mage::getBaseUrl(Mage_Core_Model_Store::URL_TYPE_SKIN).'frontend/dollskill/dollskill/images/down-arrow-black.png' ?>" onclick="showShippingList()">
+                            <img id="hide_shipping_list" src="<?php echo Mage::getBaseUrl(Mage_Core_Model_Store::URL_TYPE_SKIN).'frontend/dollskill/dollskill/images/up-arrow-black.png' ?>" onclick="hideShippingList()" style="display:none"><br />
+                            <?php if ($shippingRates[$currentShippingMethod]['FreeShippingEnable']==1 && $shippingRates[$currentShippingMethod]['FreeShippingSubtotal'] != '' && ($shippingRates[$currentShippingMethod]['FreeShippingSubtotal']-$subtotal)>0 && $shippingRates[$currentShippingMethod]['ApplicableForFreeShipping']!='1') { ?>
+                                <div class="shipping-label-newcart"><span class="shipping-msg-text">&nbsp;Add <span class="price" itemprop="price"><?php echo Mage::helper('checkout')->formatPrice(Mage::helper('core')->currency($shippingRates[$currentShippingMethod]['FreeShippingSubtotal'],false,false) - $subtotal ) ?></span> to Get Free Selected Shipping </span></div>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                    <tr class="shipping-row">
+                        <td>
+                            <div id="parent-shipping-methods">
+                                <div style="display:none;" id="shipping-methods" class="shipping-methods">
+                                    <div class="shipping-method">
+                                        <div class="glc-col">
+                                            <div id="gcheckout-shipping-method-available" class="shipping-methods-available">
+                                                <dl class="sp-methods">
+                                                    <?php $countries = Mage::getResourceModel('directory/country_collection')->loadData()->toOptionArray(false);
+                                                        if (count($countries) > 0): ?>
+                                                            <select name="country_id" id="country_id" class="validate-select" title="Country" onchange="changeCountry(this.value)">
+                                                                <?php foreach($countries as $country): ?>
+                                                                    <option value="<?php echo $country['value'] ?>" <?php if ($_SESSION['country_id'] == $country['value']) echo 'selected' ?>>
+                                                                        <?php echo $country['label'] ?>
+                                                                    </option>
+                                                                <?php endforeach; ?>
+                                                            </select>
+                                                        <?php endif; ?>
+                                                    <ul id="shipping_list">
+                                                        <?php foreach ($shippingRates as $shippingRate) { ?>
+                                                            <li>
+                                                                <input name="shipping_method" type="radio" value="<?php echo $shippingRate['Code'] ?>" id="s_method_<?php echo $shippingRate['Code'] ?>" <?php if ($currentShippingMethod == $shippingRate['Code']) echo 'checked="checked"' ?> onclick="changeShipping(this.value)" class="radio">
+                                                                <label for="s_method_<?php echo $shippingRate['Code'] ?>" id="shipping_label_<?php echo $shippingRate['Code'] ?>"><?php echo $shippingRate['Title'] ?></label>
+                                                                <span class="price" id="shipping_price_<?php echo $shippingRate['Code'] ?>">
+                                                                    <?php
+                                                                    if (($shippingRate['FreeShippingEnable']==1 && $shippingRate['FreeShippingSubtotal'] != '' && ($shippingRate['FreeShippingSubtotal']-$subtotal)<=0)
+                                                                        || ($shippingRate['ApplicableForFreeShipping']=='1')) {
+                                                                        echo "Free";
+                                                                    } else {
+                                                                        echo Mage::helper('core')->currency($shippingRate['Price'], true, false);
+                                                                    }
+                                                                    ?>
+                                                                </span>
+
+                                                                <div class="shipment-info">
+                                                                    <?php
+                                                                    if ($shippingRate['FreeShippingEnable']==1 && $shippingRate['FreeShippingSubtotal'] != '' && ($shippingRate['FreeShippingSubtotal']-$subtotal)>0 && $shippingRate['ApplicableForFreeShipping']!='1') { ?>
+                                                                        Free with&nbsp;<span class="price" itemprop="price"><?php echo Mage::helper('core')->currency($shippingRate['FreeShippingSubtotal'],true,false) ?></span> purchase!
+                                                                    <?php } ?>
+                                                                </div>
+                                                            </li>
+                                                        <?php } ?>
+                                                    </ul>
+                                                </dl>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    </table>
+                </td>
+                <td id="shipping_price_top">
+                    <?php
+                        if (($shippingRates[$currentShippingMethod]['FreeShippingEnable']==1 && $shippingRates[$currentShippingMethod]['FreeShippingSubtotal'] != '' && ($shippingRates[$currentShippingMethod]['FreeShippingSubtotal'] - $subtotal)<=0)
+                                    || ($shippingRates[$currentShippingMethod]['ApplicableForFreeShipping']=='1')) {
+                            echo "Free";
+                        } else {
+                            echo Mage::helper('core')->currency($shippingRates[$currentShippingMethod]['Price'], true, false);
+                            $subtotal = $subtotal + $shippingRates[$currentShippingMethod]['Price'];
+                        }
+                    ?>
+                </td>
+                <!--------------------------------------------->
+            </tr>
+            <tr>
+                <td>Grand Total</td>
+                <td><?php echo Mage::helper('core')->currency($subtotal, true, false) ?></td>
+            </tr>
+        </table>
+        <span id="discount"></span>
+        <br/>
+        <table id="discount-coupon-table" border="1">
+            <tr>
+                <td>Have a gift card or promo code?</td>
+            </tr>
+            <tr>
+                <td>
+                    <input class="input-text" id="coupon_code" name="coupon_code" placeholder="Enter code here" type="text">
+                    <button type="button" class="button2" onclick="getDiscount();" value="Apply"><span><span>Apply</span></span></button>
+                </td>
+            </tr>
+        </table>
+    </div>
+<?php
+}
+else {
+    echo "Cart is empty";
+}
+?>
+
+<script type="text/javascript">
+function updateItemQty(id, qty)
+{
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            //alert('quantity updated successfully');
+        }
+    };
+    xhttp.open("POST", "index.php", true);
+    xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+    xhttp.send("action=update&id="+id+"&qty="+qty);
+}
+function getDiscount()
+{
+    var code = document.getElementById('coupon_code').value;
+    if (code) {
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                document.getElementById("discount").innerHTML = this.responseText;
+            }
+        };
+        xhttp.open("POST", "discount.php", true);
+        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhttp.send("code="+code);
+    } else {
+        alert ('Enter coupon code');
+    }
+}
+function changeCountry(country)
+{
+    var subtotal = '<?php echo $subtotal ?>';
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            var data = JSON.parse(this.responseText);
+            document.getElementById("shipping_title_top").innerHTML = data.shipping_top;
+            document.getElementById("shipping_list").innerHTML = data.shipping_list;
+            document.getElementById("shipping_price_top").innerHTML = data.shipping_price;
+        }
+    };
+    xhttp.open("POST", "shipping.php", true);
+    xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+    xhttp.send("country="+country+"&subtotal="+subtotal);
+}
+function showShippingList()
+{
+    document.getElementById("show_shipping_list").style.display = "none";
+    document.getElementById("hide_shipping_list").style.display = "block";
+    document.getElementById("shipping-methods").style.display = "block";
+}
+function hideShippingList()
+{
+    document.getElementById("show_shipping_list").style.display = "block";
+    document.getElementById("hide_shipping_list").style.display = "none";
+    document.getElementById("shipping-methods").style.display = "none";
+}
+function changeShipping(code)
+{
+    document.getElementById('shipping_label_top').innerHTML = document.getElementById('shipping_label_'+code).innerHTML;
+    document.getElementById("shipping_price_top").innerHTML = document.getElementById('shipping_price_'+code).innerHTML;
+}
+</script>
+
+
+</body>
+</html>
